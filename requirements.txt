@@ -1,0 +1,7 @@
+streamlit
+gradio
+transformers
+torch
+sentencepiece
+accelerate
+pyngrok
