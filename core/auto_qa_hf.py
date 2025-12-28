@@ -1,41 +1,50 @@
 from transformers import pipeline
 
-_qg = pipeline(
-    "text2text-generation",
-    model="iarfmoose/t5-base-question-generator",
-    device=0
-)
+_qg = pipeline("text2text-generation", model="google/mt5-base")
 
-def generate_questions(text: str, n_questions: int = 5):
-    text = text.strip()
-    if len(text) < 40:
-        return ["What is the main idea?"]
+def generate_questions(text: str, lang: str = "en", n_questions: int = 50):
+    text = (text or "").strip()
+    if len(text) < 80:
+        return ["Quel est le sujet principal ?"] if lang == "fr" else ["What is the main topic?"]
 
-    prompt = f"generate questions: {text}"
-    out = _qg(prompt, max_length=256, do_sample=False)
-    gen = out[0]["generated_text"]
+    if lang == "fr":
+        prompt = (
+            "Génère 10 questions courtes de révision basées uniquement sur ce texte. "
+            "Une question par ligne.\n\n"
+            f"TEXTE:\n{text}"
+        )
+    else:
+        prompt = (
+            "Generate 10 short revision questions based only on this text. "
+            "One question per line.\n\n"
+            f"TEXT:\n{text}"
+        )
 
-    # split by ?
-    raw = [q.strip() for q in gen.split("?") if q.strip()]
-    qs = [q + "?" for q in raw]
+    out = _qg(prompt, max_length=256, do_sample=False)[0]["generated_text"]
+    lines = [l.strip() for l in out.split("\n") if l.strip()]
 
-    # clean duplicates
-    final = []
+    questions = []
+    for l in lines:
+        l = l.lstrip("-• ").strip()
+        if len(l) < 6:
+            continue
+        if not l.endswith("?"):
+            l += "?"
+        questions.append(l)
+
+    # dedupe + limit
     seen = set()
-    for q in qs:
-        q_norm = q.lower()
-        if q_norm not in seen and len(q) > 5:
+    final = []
+    for q in questions:
+        qn = q.lower()
+        if qn not in seen:
             final.append(q)
-            seen.add(q_norm)
+            seen.add(qn)
         if len(final) >= n_questions:
             break
 
-    # fallback if model returns nothing
     if not final:
-        final = [
-            "What is the main topic?",
-            "What are the key points?",
-            "Why is it important?"
-        ][:n_questions]
+        final = ["Quel est le sujet principal ?", "Quels sont les points importants ?", "Quelle est la conclusion ?"] if lang == "fr" else \
+                ["What is the main topic?", "What are the key points?", "What is the conclusion?"]
 
     return final

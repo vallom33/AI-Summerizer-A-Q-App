@@ -1,21 +1,16 @@
 from transformers import pipeline
 
+# Multilingual summarizer
 _summarizer = pipeline(
-    "summarization",
-    model="facebook/bart-large-cnn",
-    device=0
+    "text2text-generation",
+    model="csebuetnlp/mT5_multilingual_XLSum"
 )
 
-def summarize_text(text: str) -> str:
-    text = text.strip()
+def summarize_text(text: str, lang: str = "en") -> str:
+    text = (text or "").strip()
     if len(text) < 80:
-        return "النص قصير جدًا للتلخيص."
+        return "Texte trop court pour résumer." if lang == "fr" else "Text too short to summarize."
 
-    # Ultra short summary
-    out = _summarizer(
-        text,
-        max_length=60,   # كان 160
-        min_length=20,   # كان 40
-        do_sample=False
-    )
-    return out[0]["summary_text"]
+    prompt = f"summarize: {text}"
+    out = _summarizer(prompt, max_length=80, do_sample=False)
+    return out[0]["generated_text"].strip()

@@ -1,4 +1,3 @@
-
 import gradio as gr
 from core.dataset import load_jsonl_dataset
 from core.summarizer_hf import summarize_text
@@ -6,73 +5,87 @@ from core.auto_qa_hf import generate_questions
 from core.qa_hf import answer_question_with_score
 
 DATASET_PATH = "datasets/my_dataset.jsonl"
-docs = load_jsonl_dataset(DATASET_PATH)
+MIN_QUESTIONS = 3
 
+docs = load_jsonl_dataset(DATASET_PATH)
 doc_map = {f"{d['id']} - {d['title']}": d["text"] for d in docs}
 doc_choices = ["-- none --"] + list(doc_map.keys())
 
 def load_doc(choice):
     if choice == "-- none --":
         return ""
-    return doc_map[choice]
+    return doc_map.get(choice, "")
 
-
-
-def revision_mode(text, n_questions):
+def revision_mode(text, lang):
     text = (text or "").strip()
     if len(text) < 80:
-        return "Text too short.", "Please provide a longer text."
+        msg = "Texte trop court." if lang == "fr" else "Text too short."
+        return msg, msg
 
-    target = int(n_questions)
+    summary = summarize_text(text, lang=lang)
 
-    # ✅ Generate MANY questions to increase chance of good ones
-    questions = generate_questions(text, n_questions=target * 6)
+    # generate many questions -> rank by QA confidence -> pick best 3
+    candidates = generate_questions(text, lang=lang, n_questions=60)
 
-    scored_pairs = []
-    for q in questions:
+    scored = []
+    for q in candidates:
         res = answer_question_with_score(text, q)
         ans, score = res["answer"], res["score"]
-
-        # ✅ filter out weak/empty answers
-        if score < 0.20 or len(ans) < 2:
+        if score < 0.10 or len(ans) < 2:
             continue
+        scored.append((score, q, ans))
 
-        scored_pairs.append((score, q, ans))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = scored[:MIN_QUESTIONS]
 
-    # ✅ Sort by confidence score and keep top N
-    scored_pairs.sort(key=lambda x: x[0], reverse=True)
-    top_pairs = scored_pairs[:target]
+    # second chance: generate from summary
+    if len(top) < MIN_QUESTIONS:
+        candidates2 = generate_questions(summary, lang=lang, n_questions=60)
+        for q in candidates2:
+            res = answer_question_with_score(text, q)
+            ans, score = res["answer"], res["score"]
+            if score < 0.08 or len(ans) < 2:
+                continue
+            scored.append((score, q, ans))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = scored[:MIN_QUESTIONS]
 
-    summary = summarize_text(text)
-
-    # ✅ If still empty, show message (NO hardcoded topic questions)
-    if not top_pairs:
-        return summary, "Could not generate strong Q&A pairs. Try a longer text or increase text clarity."
+    # final fallback (GENERAL questions only)
+    if len(top) < MIN_QUESTIONS:
+        generic = (
+            ["De quoi parle le texte ?", "Quel est le fait le plus important ?", "Quelle est la conclusion principale ?"]
+            if lang == "fr"
+            else ["What is the text about?", "What is the most important fact?", "What is the main conclusion?"]
+        )
+        for q in generic:
+            res = answer_question_with_score(text, q)
+            ans, score = res["answer"], res["score"]
+            if score > 0.03 and len(ans) > 1:
+                top.append((score, q, ans))
 
     qa_text = ""
-    for i, (score, q, ans) in enumerate(top_pairs, start=1):
+    for i, (score, q, ans) in enumerate(top[:MIN_QUESTIONS], start=1):
         qa_text += f"Q{i}: {q}\nA{i}: {ans}\n(Confidence: {score:.2f})\n\n"
 
     return summary, qa_text
 
 
 with gr.Blocks() as demo:
-    gr.Markdown("# 🧠 AI Revision App (Summary + Auto Q&A)")
-    gr.Markdown("✅ Generate a short summary + revision questions with answers extracted from the text.")
+    gr.Markdown("# 🧠 AI Summarizer + Auto Q&A (EN/FR)")
+    gr.Markdown("✅ Generates short summary + **3 automatic revision questions** with answers.")
 
     with gr.Row():
-        choice = gr.Dropdown(doc_choices, label="📚 Choose Dataset Document")
-        load_btn = gr.Button("Load Document")
+        lang = gr.Radio(["en", "fr"], value="en", label="Language / Langue")
+        choice = gr.Dropdown(doc_choices, label="📚 Dataset Document")
+        load_btn = gr.Button("Load Doc")
 
-    text = gr.Textbox(label="📝 Text Input", lines=10, placeholder="Paste your text or load from dataset...")
+    text = gr.Textbox(label="📝 Text Input", lines=10)
     load_btn.click(load_doc, inputs=choice, outputs=text)
 
-    n_questions = gr.Slider(3, 10, value=5, step=1, label="Number of Revision Questions")
-    run_btn = gr.Button("🚀 Generate Revision (Summary + Auto Q&A)")
+    run_btn = gr.Button("🚀 Generate (Summary + 3 Q&A)")
+    summary_out = gr.Textbox(label="✅ Summary / Résumé", lines=4)
+    qa_out = gr.Textbox(label="✅ Questions & Answers", lines=12)
 
-    summary_out = gr.Textbox(label="✅ Ultra Short Summary", lines=4)
-    qa_out = gr.Textbox(label="✅ Auto Revision Questions & Answers", lines=14)
-
-    run_btn.click(revision_mode, inputs=[text, n_questions], outputs=[summary_out, qa_out])
+    run_btn.click(revision_mode, inputs=[text, lang], outputs=[summary_out, qa_out])
 
 demo.launch(share=True)
