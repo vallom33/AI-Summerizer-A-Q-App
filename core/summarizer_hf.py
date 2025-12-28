@@ -9,8 +9,12 @@ _summarizer = pipeline(
 def summarize_text(text: str, lang: str = "en") -> str:
     text = (text or "").strip()
     if len(text) < 80:
-        return "Texte trop court pour résumer." if lang == "fr" else "Text too short to summarize."
+        if lang == "fr":
+            return "Texte trop court pour résumer."
+        if lang == "ar":
+            return "النص قصير جدًا للتلخيص."
+        return "Text too short to summarize."
 
     prompt = f"summarize: {text}"
-    out = _summarizer(prompt, max_length=80, do_sample=False)
+    out = _summarizer(prompt, max_length=90, do_sample=False)
     return out[0]["generated_text"].strip()
