@@ -3,7 +3,7 @@ import gradio as gr
 from core.dataset import load_jsonl_dataset
 from core.summarizer_hf import summarize_text
 from core.auto_qa_hf import generate_questions
-from core.qa_hf import answer_question
+from core.qa_hf import answer_question_with_score
 
 DATASET_PATH = "datasets/my_dataset.jsonl"
 docs = load_jsonl_dataset(DATASET_PATH)
@@ -16,33 +16,45 @@ def load_doc(choice):
         return ""
     return doc_map[choice]
 
+
+
 def revision_mode(text, n_questions):
-    summary = summarize_text(text)
+    text = (text or "").strip()
+    if len(text) < 80:
+        return "Text too short.", "Please provide a longer text."
 
-    # ✅ Generate questions from ORIGINAL text (better)
-    questions = generate_questions(text, n_questions=int(n_questions) + 3)
+    target = int(n_questions)
 
-    qa_text = ""
-    count = 0
+    # ✅ Generate MANY questions to increase chance of good ones
+    questions = generate_questions(text, n_questions=target * 6)
 
+    scored_pairs = []
     for q in questions:
-        ans = answer_question(text, q)
+        res = answer_question_with_score(text, q)
+        ans, score = res["answer"], res["score"]
 
-        # skip weak answers
-        if "لا أستطيع" in ans:
+        # ✅ filter out weak/empty answers
+        if score < 0.20 or len(ans) < 2:
             continue
 
-        count += 1
-        qa_text += f"Q{count}: {q}\nA{count}: {ans}\n\n"
+        scored_pairs.append((score, q, ans))
 
-        if count >= int(n_questions):
-            break
+    # ✅ Sort by confidence score and keep top N
+    scored_pairs.sort(key=lambda x: x[0], reverse=True)
+    top_pairs = scored_pairs[:target]
 
-    # fallback if all skipped
-    if count == 0:
-        qa_text = "No strong Q&A pairs found. Try increasing text length or reducing summary compression."
+    summary = summarize_text(text)
+
+    # ✅ If still empty, show message (NO hardcoded topic questions)
+    if not top_pairs:
+        return summary, "Could not generate strong Q&A pairs. Try a longer text or increase text clarity."
+
+    qa_text = ""
+    for i, (score, q, ans) in enumerate(top_pairs, start=1):
+        qa_text += f"Q{i}: {q}\nA{i}: {ans}\n(Confidence: {score:.2f})\n\n"
 
     return summary, qa_text
+
 
 with gr.Blocks() as demo:
     gr.Markdown("# 🧠 AI Revision App (Summary + Auto Q&A)")

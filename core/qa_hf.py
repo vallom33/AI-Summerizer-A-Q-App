@@ -6,20 +6,18 @@ _qa = pipeline(
     device=0
 )
 
-def answer_question(context: str, question: str) -> str:
+def answer_question_with_score(context: str, question: str):
     context = context.strip()
     question = question.strip()
-
-    if not context:
-        return "لا يوجد نص للإجابة عليه."
-    if not question:
-        return "الرجاء إدخال سؤال."
+    if not context or not question:
+        return {"answer": "", "score": 0.0}
 
     result = _qa(question=question, context=context)
-    answer = result.get("answer", "").strip()
+    answer = (result.get("answer") or "").strip()
     score = float(result.get("score", 0.0))
 
-    if not answer or score < 0.20:
-        return "لا أستطيع الجواب لأن المعلومة غير واضحة أو غير موجودة في النص."
+    # if model returns empty / nonsense
+    if not answer:
+        score = 0.0
 
-    return f"{answer}\n\n(Confidence: {score:.2f})"
+    return {"answer": answer, "score": score}
