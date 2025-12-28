@@ -1,3 +1,4 @@
+%%writefile app_gradio.py
 import gradio as gr
 from core.dataset import load_jsonl_dataset
 from core.summarizer_hf import summarize_text
@@ -16,33 +17,45 @@ def load_doc(choice):
     return doc_map[choice]
 
 def revision_mode(text, n_questions):
-    # 1) summary (short)
     summary = summarize_text(text)
 
-    # 2) generate questions FROM SUMMARY (revision style)
-    questions = generate_questions(summary, n_questions=int(n_questions))
+    # ✅ Generate questions from ORIGINAL text (better)
+    questions = generate_questions(text, n_questions=int(n_questions) + 3)
 
-    # 3) answer questions FROM ORIGINAL TEXT (more accurate)
     qa_text = ""
-    for i, q in enumerate(questions, start=1):
+    count = 0
+
+    for q in questions:
         ans = answer_question(text, q)
-        qa_text += f"Q{i}: {q}\nA{i}: {ans}\n\n"
+
+        # skip weak answers
+        if "لا أستطيع" in ans:
+            continue
+
+        count += 1
+        qa_text += f"Q{count}: {q}\nA{count}: {ans}\n\n"
+
+        if count >= int(n_questions):
+            break
+
+    # fallback if all skipped
+    if count == 0:
+        qa_text = "No strong Q&A pairs found. Try increasing text length or reducing summary compression."
 
     return summary, qa_text
 
 with gr.Blocks() as demo:
-    gr.Markdown("# 🧠 AI Revision App (Summary → Auto Questions → Answers)")
-    gr.Markdown("### ✅ One-click revision: Generate short summary + automatic Q&A from summary")
+    gr.Markdown("# 🧠 AI Revision App (Summary + Auto Q&A)")
+    gr.Markdown("✅ Generate a short summary + revision questions with answers extracted from the text.")
 
     with gr.Row():
         choice = gr.Dropdown(doc_choices, label="📚 Choose Dataset Document")
         load_btn = gr.Button("Load Document")
 
-    text = gr.Textbox(label="📝 Text Input", lines=10, placeholder="Paste your text here or load from dataset...")
+    text = gr.Textbox(label="📝 Text Input", lines=10, placeholder="Paste your text or load from dataset...")
     load_btn.click(load_doc, inputs=choice, outputs=text)
 
     n_questions = gr.Slider(3, 10, value=5, step=1, label="Number of Revision Questions")
-
     run_btn = gr.Button("🚀 Generate Revision (Summary + Auto Q&A)")
 
     summary_out = gr.Textbox(label="✅ Ultra Short Summary", lines=4)
