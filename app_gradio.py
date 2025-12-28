@@ -1,4 +1,4 @@
-%%writefile app_gradio.py
+
 import gradio as gr
 from core.dataset import load_jsonl_dataset
 from core.summarizer_hf import summarize_text
